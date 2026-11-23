@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "autoback",
+  "version": "${version}",
+  "name": "AutoBack",
+  "description": "Automatically sends /back after you die and respawn.",
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["net.example.autoback.AutoBackClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.1",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
