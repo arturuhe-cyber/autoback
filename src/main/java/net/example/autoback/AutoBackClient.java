@@ -3,12 +3,19 @@ package net.example.autoback;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.DeathScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
+import org.lwjgl.glfw.GLFW;
 
 import java.io.Reader;
 import java.io.Writer;
@@ -27,6 +34,10 @@ public class AutoBackClient implements ClientModInitializer {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static Config config = new Config();
 
+    private static final KeyBinding.Category CATEGORY =
+            KeyBinding.Category.create(Identifier.of("autoback", "main"));
+    private static KeyBinding toggleKey;
+
     private static boolean died = false;
     private static boolean respawnRequested = false;
     private static int deadTicks = 0;
@@ -35,10 +46,42 @@ public class AutoBackClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         loadConfig();
+
+        // Клавиша-переключатель (B по умолчанию, меняется в настройках управления)
+        toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.autoback.toggle",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_B,
+                CATEGORY));
+
+        // Команда /autoback тоже переключает мод
+        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
+                dispatcher.register(ClientCommandManager.literal("autoback").executes(context -> {
+                    toggle(context.getSource().getClient());
+                    return 1;
+                })));
+
         ClientTickEvents.END_CLIENT_TICK.register(AutoBackClient::onTick);
     }
 
+    private static void toggle(MinecraftClient client) {
+        config.enabled = !config.enabled;
+        died = false;
+        respawnRequested = false;
+        deadTicks = 0;
+        aliveTicks = 0;
+        saveConfig();
+        if (client.player != null) {
+            client.player.sendMessage(
+                    Text.literal("[AutoBack] " + (config.enabled ? "ON" : "OFF")), true);
+        }
+    }
+
     private static void onTick(MinecraftClient client) {
+        while (toggleKey.wasPressed()) {
+            toggle(client);
+        }
+
         if (!config.enabled) return;
 
         ClientPlayerEntity player = client.player;
@@ -84,8 +127,12 @@ public class AutoBackClient implements ClientModInitializer {
         player.sendMessage(Text.literal("[AutoBack] /" + cmd), true);
     }
 
+    private static Path configFile() {
+        return FabricLoader.getInstance().getConfigDir().resolve("autoback.json");
+    }
+
     private static void loadConfig() {
-        Path file = FabricLoader.getInstance().getConfigDir().resolve("autoback.json");
+        Path file = configFile();
         try {
             if (Files.exists(file)) {
                 try (Reader reader = Files.newBufferedReader(file)) {
@@ -93,10 +140,15 @@ public class AutoBackClient implements ClientModInitializer {
                     if (loaded != null) config = loaded;
                 }
             }
-            // Перезаписываем, чтобы в файле всегда были все настройки
-            try (Writer writer = Files.newBufferedWriter(file)) {
-                GSON.toJson(config, writer);
-            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        saveConfig(); // чтобы в файле всегда были все настройки
+    }
+
+    private static void saveConfig() {
+        try (Writer writer = Files.newBufferedWriter(configFile())) {
+            GSON.toJson(config, writer);
         } catch (Exception e) {
             e.printStackTrace();
         }
